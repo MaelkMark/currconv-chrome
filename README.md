@@ -1,4 +1,4 @@
-<div style="text-align: center;">
+<div align="center" style="text-align: center;">
     <img src="icons/icon128.png" />
     <h1>The CurrConv Chrome Extension</h1>
     <p>v1.0.0</p>
