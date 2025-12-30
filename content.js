@@ -21,6 +21,9 @@ class CurrencyConverter {
         this.conversionRates = null;
         this.usage = null;
 
+        // Selection
+        this.selection = null;
+
         // Initialize
         this.patterns = this.buildPatterns();
         this.ui = this.createUI();
@@ -97,10 +100,10 @@ class CurrencyConverter {
     }
 
     async handleSelection() {
-        const selection = window.getSelection();
-        const selectedText = selection.toString();
+        this.selection = window.getSelection();
+        const selectedText = this.selection.toString();
 
-        if (!selectedText || !selection.rangeCount) {
+        if (!selectedText || !this.selection.rangeCount) {
             this.ui.container.dataset.show = "false";
             return;
         }
@@ -119,10 +122,10 @@ class CurrencyConverter {
 
         // Fetch Data
         const error = await this.updateDataIfNeeded();
-
+        
         // Render
         this.renderPopup(error, fromCurrencies, fromValue);
-        this.positionPopup(selection);
+        this.positionPopup();
     }
 
     parseSelection(text) {
@@ -189,12 +192,9 @@ class CurrencyConverter {
                     return message;
                 }
 
-                this.ui.loader.dataset.show = "true";
-                this.ui.message.innerHTML = "Fetching latest rates...";
-                this.ui.container.dataset.show = "true"; // Show popup while loading
-
+                this.renderPopupLoader("Fetching rates...");
                 const ratesData = await this.fetchRates();
-                this.ui.loader.dataset.show = "false";
+                this.hidePopupLoader();
 
                 if (ratesData.error) return this.handleApiError(ratesData);
 
@@ -204,7 +204,7 @@ class CurrencyConverter {
             return ""; // No error
         } catch (e) {
             console.error("CurrConv error:", e);
-            this.ui.loader.dataset.show = "false";
+            this.hidePopupLoader();
             return "Something went wrong.";
         }
     }
@@ -239,6 +239,18 @@ class CurrencyConverter {
         }
         console.error(`CurrConv error: ${message}`, response);
         return message;
+    }
+
+    renderPopupLoader(message) {
+        this.ui.loader.dataset.show = "true";
+        this.ui.message.innerHTML = message;
+        this.ui.container.dataset.show = "true";
+        this.positionPopup();
+    }
+    
+    hidePopupLoader() {
+        this.ui.loader.dataset.show = "false";
+        this.ui.container.dataset.show = "false";
     }
 
     renderPopup(errorMessage, fromCurrencies, fromValue) {
@@ -292,13 +304,10 @@ class CurrencyConverter {
         this.ui.currenciesList.innerHTML = html;
     }
 
-    positionPopup(selection) {
-        if (!selection.rangeCount) return;
-        const rect = selection.getRangeAt(0).getBoundingClientRect();
+    positionPopup() {
+        if (!this.selection.rangeCount) return;
+        const rect = this.selection.getRangeAt(0).getBoundingClientRect();
         const popup = this.ui.container;
-
-        const popupShowValue = popup.dataset.show;
-        popup.dataset.show = "true";
 
         let top, left;
         if (rect.left + popup.offsetWidth < document.body.clientWidth) {
@@ -319,8 +328,6 @@ class CurrencyConverter {
 
         popup.style.left = `${x}px`;
         popup.style.top = `${y}px`;
-
-        popup.dataset.show = popupShowValue;
     }
 }
 
