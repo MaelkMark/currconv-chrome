@@ -1,248 +1,336 @@
-async function loadData() {
-    const apiKey = await fetch(chrome.runtime.getURL("api.key")).then(
-        (response) => response.text()
-    );
-
-    const config = await fetch(chrome.runtime.getURL("config.json")).then(
-        (response) => response.json()
-    );
-
-    const currencies = await fetch(chrome.runtime.getURL("currencies.json")).then(
-        (response) => response.json()
-    );
-
-    init(apiKey, config, currencies);
-}
-
-function numberWithSpaces(number) {
-    var parts = number.toString().split(".");
+/**
+ * Formats numbers with spaces as thousand separators.
+ */
+function formatNumber(number) {
+    const parts = number.toString().split(".");
     parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, " ");
     return parts.join(".");
-}
+};
 
-async function init(apiKey, config, currencies) {
-    // Create the popup element
-    const popup = document.createElement("div");
-    popup.className = "currconv-popup";
-    popup.dataset.result = "succcess";
-    popup.dataset.show = false;
+class CurrencyConverter {
+    constructor(apiKey, config, currencies) {
+        this.apiKey = apiKey.trim();
+        this.config = config;
+        this.currencies = currencies;
 
-    const loader = document.createElement("div");
-    loader.className = "currconv-loader";
-    loader.dataset.show = false;
-    popup.appendChild(loader);
+        // Cache currency codes and symbols
+        this.codes = [...new Set(Object.values(currencies).flat())];
+        this.symbols = Object.keys(currencies);
 
-    const popupMessage = document.createElement("div");
-    popupMessage.className = "currconv-popup-message";
-    popupMessage.style.fontSize = config.fontSize.message + "pt";
-    popup.appendChild(popupMessage);
-    document.body.appendChild(popup);
-    
-    const popupCurrencies = document.createElement("div");
-    popupCurrencies.className = "currconv-popup-currencies";
-    popupCurrencies.style.fontSize = config.fontSize.currencies + "pt";
-    popup.appendChild(popupCurrencies);
-    
-    const popupUpdated = document.createElement("div");
-    popupUpdated.className = "currconv-popup-updated";
-    popupUpdated.style.fontSize = config.fontSize.ratesUpdated + "pt";
-    popup.appendChild(popupUpdated);
-    popupUpdated.style.display = config.displayModule.ratesUpdated ? "block" : "none";
+        // State
+        this.conversionRates = null;
+        this.usage = null;
 
-    const popupUsage = document.createElement("div");
-    popupUsage.className = "currconv-popup-updated";
-    popupUsage.style.fontSize = config.fontSize.usage + "pt";
-    popup.appendChild(popupUsage);
-    popupUsage.style.display = config.displayModule.usage ? "block" : "none";
+        // Initialize
+        this.patterns = this.buildPatterns();
+        this.ui = this.createUI();
+        this.attachEvents();
+    }
 
+    buildPatterns() {
+        const escapedCodes = this.codes.map(RegExp.escape);
+        const escapedSymbols = this.symbols.map(RegExp.escape);
+        const joinedSymbols = escapedSymbols.join("");
 
-    // Display the popup after the user selected something and released the mouse button
-    document.addEventListener("mouseup", async () => {
+        // Regex to match currency codes (e.g. 100 USD or USD 100)
+        const codePattern = new RegExp(
+            String.raw`(?<![^\s\-+${joinedSymbols}])(?:(?<value>\d+[\d ,]*(\.\d)?[\d ,]*)[ ]*(?<code>${escapedCodes.join("|")})[ ]*|[ ]*(?<code2>${escapedCodes.join("|")})[ ]*(?<value2>\d+[\d ,]*(\.\d)?[\d ,]*))\.?(?![^\s+\-,;?!${joinedSymbols}])`,
+            "i"
+        );
+
+        // Regex to match currency symbols (e.g. $100 or 100$)
+        const symbolPattern = new RegExp(
+            String.raw`(?:(?<![^\s\-+])(?<value2>\d+[\d ,]*(\.\d)?[\d ]*)[ ]*(?<symbol2>${escapedSymbols.join("|")})|(?<![^\s\w\-+])(?<symbol>${escapedSymbols.join("|")})[ ]*(?<value>\d+[\d ,]*(\.\d)?[\d ]*))\.?(?![^\s+\-,;?!])`,
+            "i"
+        );
+
+        return { codePattern, symbolPattern };
+    }
+
+    createUI() {
+        const container = document.createElement("div");
+        container.className = "currconv-popup";
+        container.dataset.result = "success";
+        container.dataset.show = "false";
+
+        const loader = document.createElement("div");
+        loader.className = "currconv-loader";
+        loader.dataset.show = "false";
+        container.appendChild(loader);
+
+        const message = document.createElement("div");
+        message.className = "currconv-popup-message";
+        message.style.fontSize = `${this.config.fontSize.message}pt`;
+        container.appendChild(message);
+
+        const currenciesList = document.createElement("div");
+        currenciesList.className = "currconv-popup-currencies";
+        currenciesList.style.fontSize = `${this.config.fontSize.currencies}pt`;
+        container.appendChild(currenciesList);
+
+        const updatedTime = document.createElement("div");
+        updatedTime.className = "currconv-popup-updated";
+        updatedTime.style.fontSize = `${this.config.fontSize.ratesUpdated}pt`;
+        updatedTime.style.display = this.config.displayModule.ratesUpdated ? "block" : "none";
+        container.appendChild(updatedTime);
+
+        const usageInfo = document.createElement("div");
+        usageInfo.className = "currconv-popup-updated";
+        usageInfo.style.fontSize = `${this.config.fontSize.usage}pt`;
+        usageInfo.style.display = this.config.displayModule.usage ? "block" : "none";
+        container.appendChild(usageInfo);
+
+        document.body.appendChild(container);
+
+        return { container, loader, message, currenciesList, updatedTime, usageInfo };
+    }
+
+    attachEvents() {
+        document.addEventListener("mouseup", (e) => this.handleSelection(e));
+        document.addEventListener("mousedown", (e) => this.handleOutsideClick(e));
+    }
+
+    handleOutsideClick(e) {
+        if (e.target !== this.ui.container && !this.ui.container.contains(e.target)) {
+            this.ui.container.dataset.show = "false";
+        }
+    }
+
+    async handleSelection() {
         const selection = window.getSelection();
         const selectedText = selection.toString();
 
-        if (selectedText.length == 0 || !selection.rangeCount) {
-            popup.dataset.show = false;
+        if (!selectedText || !selection.rangeCount) {
+            this.ui.container.dataset.show = "false";
             return;
         }
 
-        popupCurrencies.innerHTML = "";
-        popupUpdated.innerHTML = "";
-        
-        const codes = [...new Set(Object.values(currencies).flat())];
-        const symbols = [...Object.keys(currencies)];
-        const regexpCodes = codes.map((currency) => RegExp.escape(currency));
-        const regexpSymbols = symbols.map((currency) => RegExp.escape(currency));
+        // Reset UI
+        this.ui.currenciesList.innerHTML = "";
+        this.ui.updatedTime.innerHTML = "";
+        this.ui.message.innerHTML = "";
 
-        /* const pattern = RegExp(
-            `(?<value>\\d+)\\s*(?<currency>${regexpCodes}|${regexpSymbols})|(?<currency>${regexpCodes}|${regexpSymbols})\\s*(?<value>\\d+)(?!\\s*(${regexpCodes}|${regexpSymbols}))`,
-            "i"
-        ); */
+        // Parse Selection
+        const { fromCurrencies, fromValue } = this.parseSelection(selectedText);
 
-        const codePattern = RegExp(
-            String.raw`(?<![^\s\-+${regexpSymbols.join("")}])(?:(?<value>\d+[\d ,]*(\.\d)?[\d ,]*)[ ]*(?<code>${regexpCodes.join("|")})[ ]*|[ ]*(?<code2>${regexpCodes.join("|")})[ ]*(?<value2>\d+[\d ,]*(\.\d)?[\d ,]*))\.?(?![^\s+\-,;?!${regexpSymbols.join("")}])`,
-            "i"
-        );
-
-        const symbolPattern = RegExp(
-            String.raw`(?:(?<![^\s\-+])(?<value2>\d+[\d ,]*(\.\d)?[\d ]*)[ ]*(?<symbol2>${regexpSymbols.join("|")})|(?<![^\s\w\-+])(?<symbol>${regexpSymbols.join("|")})[ ]*(?<value>\d+[\d ,]*(\.\d)?[\d ]*))\.?(?![^\s+\-,;?!])`,
-            "i"
-        );
-
-        const codeMatches = selectedText.match(codePattern);
-        const symbolMatches = selectedText.match(symbolPattern);
-
-        let fromCurrencies = [codeMatches?.groups?.code || codeMatches?.groups?.code2 || currencies[symbolMatches?.groups?.symbol || symbolMatches?.groups?.symbol2]].flat();
-        fromCurrencies = fromCurrencies.filter(currency => Object.values(currencies).flat().includes(currency));
-        let fromValue = codeMatches?.groups?.value || codeMatches?.groups?.value2 || symbolMatches?.groups?.value || symbolMatches?.groups?.value2;
-
-        if (!fromValue || !fromCurrencies)
+        if (!fromValue || !fromCurrencies || fromCurrencies.length === 0) {
             return;
-
-        fromValue = parseFloat(fromValue.replace(/[\s,]/g, ""));
-        
-        let errorMessage = "";
-        let conversionRates = null;
-        let usage = null;
-        if (!chrome.runtime?.id) {
-            errorMessage = "Please reload the page.";
-        } else {
-            await (async () => {
-                const stored = await chrome.storage.local.get(["conversionRates"]);
-                conversionRates = stored.conversionRates;
-                
-                // The number of hours since the data was last updated
-                const passedHours = (new Date() - conversionRates?.timestamp * 1000) / 1000 / 60 / 60;
-                const fetchRates = !conversionRates || passedHours > config.updateFrequencyHours;
-
-                let usageJson = null;
-                if (fetchRates || config.displayModule.usage) {
-                    const usageResponse = await fetch(`https://openexchangerates.org/api/usage.json?app_id=${apiKey}`);
-                    usageJson = await usageResponse.json();
-                    if (usageJson.error) {
-                        handleError(usageJson.message, usageJson);
-                        return;
-                    }
-    
-                    usage = usageJson.data.usage;
-                }
-
-                if (fetchRates) {
-                    console.log("CurrConv: Fetching rates");
-
-                    if (usageJson.data.status == "access_restricted" || usageJson.data.usage.requests_remaining == 0) {
-                        console.warn(`CurrConv warning: You hit the API access limit. Your quota will reset in ${usageJson.data.usage.days_remaining} days.`);
-                        errorMessage = `You hit the API access limit.<br>Your quota will reset in ${usageJson.data.usage.days_remaining} days.`;
-                    }
-
-                    loader.dataset.show = true;
-                    popupMessage.innerHTML = "Fetching latest rates...";
-                    showPopup(selection);
-                    
-                    const latestResponse = await fetch(
-                        `https://openexchangerates.org/api/latest.json?app_id=${apiKey}&symbols=${codes.join(",")}`
-                    )
-                    const latestJson = await latestResponse.json();
-                    if (latestJson.error) {
-                        handleError(latestJson.message, latestJson);
-                        return;
-                    }
-                    conversionRates = latestJson;
-                    chrome.storage.local.set({ conversionRates: latestJson });
-                }
-
-                function handleError(errorCode, response) {
-                    switch(errorCode) {
-                        case "invalid_app_id":
-                            errorMessage = "Invalid API key";
-                            console.error(`CurrConv error: Invalid API key. Sign up at https://openexchangerates.org/signup and copy the API key to api.key.`);
-                            break;
-                        case "missing_app_id":
-                            errorMessage = "Missing API key";
-                            console.error(`CurrConv error: Missing API key. Sign up at https://openexchangerates.org/signup and copy the API key to api.key.`);
-                            break;
-                        case "access_restricted":
-                            errorMessage = "You hit the access limit";
-                            console.error(`CurrConv error: Access restricted. You most likely ran out of your quota. Check the API usage on https://openexchangerates.org/account/usage.`);
-                            break;
-                        case "not_allowed":
-                            errorMessage = "You hit the access limit";
-                            console.error(`CurrConv error: Access restricted. You most likely ran out of your quota. Check the API usage on https://openexchangerates.org/account/usage.`);
-                            break;
-                    }
-                    console.error(`CurrConv error: ${response.message} (${response.status}) - ${response.description}`);
-                }
-            })();
         }
 
-        loader.dataset.show = false;
-        popupMessage.innerHTML = errorMessage;
+        // Fetch Data
+        const error = await this.updateDataIfNeeded();
 
-        if (!conversionRates) {
-            popup.dataset.result = "error";
-            popupMessage.innerHTML = errorMessage || "Something went wrong.<br>Check the devtools console for more info.";
+        // Render
+        this.renderPopup(error, fromCurrencies, fromValue);
+        this.positionPopup(selection);
+    }
+
+    parseSelection(text) {
+        const codeMatches = text.match(this.patterns.codePattern);
+        const symbolMatches = text.match(this.patterns.symbolPattern);
+
+        const matchedCode = codeMatches?.groups?.code || codeMatches?.groups?.code2;
+        const matchedSymbol = symbolMatches?.groups?.symbol || symbolMatches?.groups?.symbol2;
+
+        let fromCurrencies = [];
+        if (matchedCode) {
+            fromCurrencies = [matchedCode];
+        } else if (matchedSymbol) {
+            const mapped = this.currencies[matchedSymbol];
+            if (Array.isArray(mapped)) {
+                fromCurrencies = mapped;
+            } else if (mapped) {
+                fromCurrencies = [mapped];
+            }
+        }
+
+        // Filter valid currencies
+        fromCurrencies = fromCurrencies.filter(c => this.codes.includes(c));
+
+        let valueStr = codeMatches?.groups?.value || codeMatches?.groups?.value2 || symbolMatches?.groups?.value || symbolMatches?.groups?.value2;
+
+        if (!valueStr)
+            return { fromCurrencies: null, fromValue: null };
+
+        const fromValue = parseFloat(valueStr.replace(/[\s,]/g, ""));
+        return { fromCurrencies, fromValue };
+    }
+
+    async updateDataIfNeeded() {
+        if (!chrome.runtime?.id)
+            return "Please reload the page.";
+
+        try {
+            const stored = await chrome.storage.local.get(["conversionRates"]);
+            this.conversionRates = stored.conversionRates;
+
+            const passedHours = this.conversionRates
+                ? (new Date() - this.conversionRates.timestamp * 1000) / 1000 / 60 / 60
+                : Infinity;
+
+            const shouldFetchRates = !this.conversionRates || passedHours > this.config.updateFrequencyHours;
+
+            // Fetch Usage if needed
+            if (shouldFetchRates || this.config.displayModule.usage) {
+                const usageData = await this.fetchUsage();
+                if (usageData.error)
+                    return this.handleApiError(usageData);
+                this.usage = usageData.data.usage;
+            }
+
+            // Fetch Rates if needed
+            if (shouldFetchRates) {
+                console.log("CurrConv: Fetching rates");
+
+                // Check limits
+                if (this.usage && (this.usage.requests_remaining === 0)) {
+                    const message = `You hit the API access limit.<br>Your quota will reset in ${this.usage.days_remaining} days.`;
+                    console.warn(`CurrConv warning: ${message.replace('<br>', ' ')}`);
+                    return message;
+                }
+
+                this.ui.loader.dataset.show = "true";
+                this.ui.message.innerHTML = "Fetching latest rates...";
+                this.ui.container.dataset.show = "true"; // Show popup while loading
+
+                const ratesData = await this.fetchRates();
+                this.ui.loader.dataset.show = "false";
+
+                if (ratesData.error) return this.handleApiError(ratesData);
+
+                this.conversionRates = ratesData;
+                chrome.storage.local.set({ conversionRates: ratesData });
+            }
+            return ""; // No error
+        } catch (e) {
+            console.error("CurrConv error:", e);
+            this.ui.loader.dataset.show = "false";
+            return "Something went wrong.";
+        }
+    }
+
+    async fetchUsage() {
+        const response = await fetch(`https://openexchangerates.org/api/usage.json?app_id=${this.apiKey}`);
+        return response.json();
+    }
+
+    async fetchRates() {
+        const response = await fetch(
+            `https://openexchangerates.org/api/latest.json?app_id=${this.apiKey}&symbols=${this.codes.join(",")}`
+        );
+        return response.json();
+    }
+
+    handleApiError(response) {
+        const code = response.message || response.description;
+        let message = `Error: ${code}`;
+
+        switch (response.message) {
+            case "missing_app_id":
+                message = "Missing API key.";
+                break;
+            case "invalid_app_id":
+                message = "Invalid API key.";
+                break;
+            case "access_restricted":
+            case "not_allowed":
+                message = "Quota exceeded (access restricted)";
+                break;
+        }
+        console.error(`CurrConv error: ${message}`, response);
+        return message;
+    }
+
+    renderPopup(errorMessage, fromCurrencies, fromValue) {
+        this.ui.message.innerHTML = errorMessage;
+
+        if (!this.conversionRates) {
+            this.ui.container.dataset.result = "error";
+            if (!errorMessage)
+                this.ui.message.innerHTML = "No conversion data available.";
         } else if (errorMessage) {
-            popup.dataset.result = "warning";
+            this.ui.container.dataset.result = "warning";
         } else {
-            popup.dataset.result = "success";
+            this.ui.container.dataset.result = "success";
+            this.renderConversions(fromCurrencies, fromValue);
+            this.ui.updatedTime.innerHTML = new Date(this.conversionRates.timestamp * 1000).toLocaleString(this.config.dateFormat);
         }
 
-        if (conversionRates) {
-            let html = "";
-            for (const currency of fromCurrencies.slice(0, config.maxCurrencies || Infinity)) {
-                const valueInUSD = (1 / conversionRates.rates[currency]) * fromValue;
-                const valueInTarget = valueInUSD * conversionRates.rates[config.convertTo];
-                const convertedValue = numberWithSpaces(valueInTarget.toFixed(config.decimals));
-                const from = numberWithSpaces(fromValue);
-
-                html += `
-                    <div class="currconv-currency-from-value">${from}</div>
-                    <div class="currconv-currency-from-currency">${currency}</div>
-                    <div class="currconv-currency-equals">=</div>
-                    <div class="currconv-currency-to-value">${convertedValue}</div>
-                    <div class="currconv-currency-to-currency">${config.convertTo}</div>
-                `;
-            }
-            popupCurrencies.innerHTML = html;
-
-            popupUpdated.innerHTML = new Date(conversionRates.timestamp * 1000).toLocaleString("hu-HU");
+        if (this.usage) {
+            this.ui.usageInfo.innerHTML = `${this.usage.requests_remaining} requests left.`;
         }
 
-        if (usage) {
-            popupUsage.innerHTML = `${usage.requests_remaining} requests left.`;
+        this.ui.container.dataset.show = "true";
+    }
+
+    renderConversions(fromCurrencies, fromValue) {
+        let html = "";
+        const limit = this.config.maxCurrencies || Infinity;
+
+        for (const currency of fromCurrencies.slice(0, limit)) {
+            const rate = this.conversionRates.rates[currency];
+            if (!rate) continue;
+
+            const valueInUSD = (1 / rate) * fromValue;
+            const valueInTarget = valueInUSD * this.conversionRates.rates[this.config.convertTo];
+
+            const convertedStr = formatNumber(valueInTarget.toFixed(this.config.decimals));
+            const fromStr = formatNumber(fromValue);
+
+            html += `
+                <div class="currconv-currency-from-value">${fromStr}</div>
+                <div class="currconv-currency-from-currency">${currency}</div>
+                <div class="currconv-currency-equals">=</div>
+                <div class="currconv-currency-to-value">${convertedStr}</div>
+                <div class="currconv-currency-to-currency">${this.config.convertTo}</div>
+            `;
+        }
+        this.ui.currenciesList.innerHTML = html;
+    }
+
+    positionPopup(selection) {
+        if (!selection.rangeCount) return;
+        const rect = selection.getRangeAt(0).getBoundingClientRect();
+        const popup = this.ui.container;
+
+        const popupShowValue = popup.dataset.show;
+        popup.dataset.show = "true";
+
+        let top, left;
+        if (rect.left + popup.offsetWidth < document.body.clientWidth) {
+            left = rect.left;
+        } else {
+            left = rect.right - popup.offsetWidth;
         }
 
-        popup.dataset.show = true;
-        showPopup(selection);
-
-        function showPopup(selection) {
-            if (!selection.rangeCount) return;
-
-            const rect = selection.getRangeAt(0).getBoundingClientRect();
-            
-            let top, left;
-            popup.dataset.show = true;
-            if (rect.left + popup.offsetWidth < document.body.clientWidth) {
-                left = `${rect.left}px`;
-            } else {
-                left = `${rect.right - popup.offsetWidth}px`;
-            }
-            if (rect.top - popup.offsetHeight - 5 > 0) {
-                top = `${rect.top - popup.offsetHeight - 5}px`;
-            } else {
-                top = `${rect.bottom + 5}px`;
-            }
-
-            popup.style.left = Math.max(10, Math.min(document.body.clientWidth - popup.offsetWidth - 10, parseInt(left))) + "px";
-            popup.style.top = Math.max(10, Math.min(document.body.clientHeight - popup.offsetHeight - 10, parseInt(top))) + "px";
+        if (rect.top - popup.offsetHeight - 5 > 0) {
+            top = rect.top - popup.offsetHeight - 5;
+        } else {
+            top = rect.bottom + 5;
         }
-    });
 
-    document.addEventListener("mousedown", (e) => {
-        if (e.target !== popup) {
-            popup.dataset.show = false;
-        }
-    });
+        // Clamp to viewport
+        const x = Math.max(10, Math.min(document.body.clientWidth - popup.offsetWidth - 10, left));
+        const y = Math.max(10, Math.min(document.body.clientHeight - popup.offsetHeight - 10, top));
+
+        popup.style.left = `${x}px`;
+        popup.style.top = `${y}px`;
+
+        popup.dataset.show = popupShowValue;
+    }
 }
 
-loadData();
+// Init
+(async () => {
+    try {
+        const [apiKey, config, currencies] = await Promise.all([
+            fetch(chrome.runtime.getURL("api.key")).then(response => response.text()),
+            fetch(chrome.runtime.getURL("config.json")).then(response => response.json()),
+            fetch(chrome.runtime.getURL("currencies.json")).then(response => response.json())
+        ]);
+    
+        new CurrencyConverter(apiKey, config, currencies);
+    } catch (error) {
+        console.error("CurrConv: Failed to initialize.", error);
+    }
+})();
