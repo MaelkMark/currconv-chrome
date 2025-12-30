@@ -248,13 +248,17 @@ class CurrencyConverter {
             this.ui.container.dataset.result = "error";
             if (!errorMessage)
                 this.ui.message.innerHTML = "No conversion data available.";
-        } else if (errorMessage) {
-            this.ui.container.dataset.result = "warning";
         } else {
-            this.ui.container.dataset.result = "success";
+            if (errorMessage) {
+                this.ui.container.dataset.result = "warning";
+            } else {
+                this.ui.container.dataset.result = "success";
+            }
+            
             this.renderConversions(fromCurrencies, fromValue);
             this.ui.updatedTime.innerHTML = new Date(this.conversionRates.timestamp * 1000).toLocaleString(this.config.dateFormat);
         }
+
 
         if (this.usage) {
             this.ui.usageInfo.innerHTML = `${this.usage.requests_remaining} requests left.`;
