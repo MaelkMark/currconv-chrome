@@ -23,7 +23,7 @@ A good bug report shouldn't leave others needing to chase you up for more inform
 - Make sure that you are using the latest version.
 - Determine if your bug is really a bug and not an error on your side.
 - Check the [currently working on](README.md#currently-working-on) section to see if we are already working on this bug.
-- To see if other users have experienced (and potentially already solved) the same issue you are having, check if there is not already a bug report existing for your bug or error in the [bug tracker](https://github.com/MaelkMark/currconv/issues?q=label%3Abug).
+- To see if other users have experienced (and potentially already solved) the same issue you are having, check if there is not already a bug report existing for your bug or error in the [bug tracker](https://github.com/MaelkMark/currconv-chrome/issues?q=label%3Abug).
 - Collect information about the bug:
 
   - Stack trace (Traceback)
@@ -32,9 +32,9 @@ A good bug report shouldn't leave others needing to chase you up for more inform
 
 ### How Do I Submit a Good Bug Report?
 
-Bugs are tracked as [GitHub issues](https://github.com/MaelkMark/currconv/issues). If you run into an issue with the project:
+Bugs are tracked as [GitHub issues](https://github.com/MaelkMark/currconv-chrome/issues). If you run into an issue with the project:
 
-- Open an [Issue](https://github.com/MaelkMark/currconv/issues/new). (Since we can't be sure at this point whether it is a bug or not, we ask you not to talk about a bug yet and not to label the issue.)
+- Open an [Issue](https://github.com/MaelkMark/currconv-chrome/issues/new). (Since we can't be sure at this point whether it is a bug or not, we ask you not to talk about a bug yet and not to label the issue.)
 - Explain the behavior you would expect and the actual behavior.
 - Please provide as much context as possible and describe the *reproduction steps* that someone else can follow to recreate the issue on their own.
 - Provide the information you collected in the previous section.
@@ -46,13 +46,13 @@ This section guides you through submitting an enhancement suggestion for CurrCon
 ### Before Submitting an Enhancement
 
 - Make sure that you are using the latest version.
-- Find out if the functionality is already covered, maybe by an individual [configuration](#configuration).
+- Find out if the functionality is already covered, maybe by an individual [configuration](README.md#configuration).
 - Check the [currently working on](README.md#currently-working-on) section to see if we are already working on this functionality.
-- Perform a [search](https://github.com/MaelkMark/currconv/issues) to see if the enhancement has already been suggested. If it has, add a comment to the existing issue instead of opening a new one.
+- Perform a [search](https://github.com/MaelkMark/currconv-chrome/issues) to see if the enhancement has already been suggested. If it has, add a comment to the existing issue instead of opening a new one.
 
 ### How Do I Submit a Good Enhancement Suggestion?
 
-Enhancement suggestions are tracked as [GitHub issues](https://github.com/MaelkMark/currconv/issues).
+Enhancement suggestions are tracked as [GitHub issues](https://github.com/MaelkMark/currconv-chrome/issues).
 
 - Use a **clear and descriptive title** for the issue to identify the suggestion.
 - Provide a **step-by-step description of the suggested enhancement** in as many details as possible.

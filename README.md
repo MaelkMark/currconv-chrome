@@ -28,7 +28,7 @@ The currencies are converted with the [Open Exchange Rates](https://openexchange
 ### Download
 Download with git:
 ```
-git clone https://github.com/MaelkMark/currconv.git
+git clone https://github.com/MaelkMark/currconv-chrome.git
 ```
 
 or simply download as ZIP (Code > Download ZIP) and unzip the folder.
